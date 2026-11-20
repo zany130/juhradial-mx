@@ -874,7 +874,7 @@ DEFAULT_CONFIG = {
     "thumbwheel": {"mode": "off", "invert": False, "speed": 1},
     "buttons": {k: d for (k, _l, d) in BUTTON_SLOTS},
     # Start at Login defaults on (the installer writes the autostart entry).
-    "app": {"start_at_login": True, "show_tray_icon": True, "suggest_profiles": True,
+    "app": {"start_at_login": not bool(os.environ.get("FLATPAK_ID")), "show_tray_icon": True, "suggest_profiles": True,
             "check_updates": True},
     # wheel "" is the overlay no-op (falsy in _config_wheel_key), so a merged
     # default never overrides the theme-derived wheel for existing users.
@@ -5051,6 +5051,10 @@ class Backend(QObject):
 
     @pyqtSlot(bool)
     def setStartAtLogin(self, on):
+        if os.environ.get("FLATPAK_ID"):
+            self.setLocal("app.start_at_login", False)
+            self.toast.emit(_("Start at login is not available in this experimental Flatpak."))
+            return
         self.setLocal("app.start_at_login", bool(on))
         try:
             if on:
@@ -5098,6 +5102,8 @@ class Backend(QObject):
         /usr/bin/juhradial-mx, which fails with status=127 on curl installs
         (#32, #129). A valid entry is left alone.
         """
+        if os.environ.get("FLATPAK_ID"):
+            return
         if not self.get("app.start_at_login", True):
             return
         try:
@@ -6079,7 +6085,8 @@ class Backend(QObject):
     @pyqtSlot()
     def restartDaemon(self):
         try:
-            subprocess.Popen(["systemctl", "--user", "restart", "juhradialmx-daemon.service"],
+            subprocess.Popen((["juhradial-mx", "--restart-daemon"] if os.environ.get("FLATPAK_ID")
+                              else ["systemctl", "--user", "restart", "juhradialmx-daemon.service"]),
                              start_new_session=True)
             self.notify(_("Restarting the background service…"), "info")
         except OSError as e:
@@ -6089,6 +6096,9 @@ class Backend(QObject):
     def restartOverlay(self):
         """Stop the running overlay (by its bus name's owner) and start it
         again through the launcher, which starts whatever is not running."""
+        if os.environ.get("FLATPAK_ID"):
+            subprocess.Popen(["juhradial-mx", "--restart-overlay"])
+            return
         pid = self._overlay_pid()
         if pid:
             try:
@@ -6116,6 +6126,8 @@ class Backend(QObject):
     # ---- autostart health (the #129 / #32 failures were invisible) ----
     @pyqtSlot(result="QVariant")
     def autostartStatus(self):
+        if os.environ.get("FLATPAK_ID"):
+            return {"ok": False, "text": _("Start at login is not available in this experimental Flatpak.")}
         on = bool(self.get("app.start_at_login", True))
         if not on:
             return {"ok": True, "text": ""}
@@ -6130,6 +6142,9 @@ class Backend(QObject):
 
     @pyqtSlot()
     def repairAutostart(self):
+        if os.environ.get("FLATPAK_ID"):
+            self.setStartAtLogin(False)
+            return
         try:
             self._write_autostart(self._find_launcher())
             self.notify(_("Login entry repaired"), "success")
